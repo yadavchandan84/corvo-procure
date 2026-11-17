@@ -104,7 +104,7 @@ scripts/      seed, CLI batch run, reset                          tests/       v
 
 Vercel (Next.js) with Neon Postgres (free tier, does not expire):
 
-1. In Vercel, import the GitHub repo, then **Storage → Create → Neon** and connect it to the project. This sets `DATABASE_URL`. Also set `DIRECT_URL` to the non-pooled Neon URL (`DATABASE_URL_UNPOOLED`).
+1. In Vercel, import the GitHub repo, then **Storage → Create → Neon** and connect it to the project. This sets `DATABASE_URL` and `DATABASE_URL_UNPOOLED`, which the app uses as they are.
 2. Optionally set `GEMINI_API_KEY`.
 3. The build command `npm run vercel-build` runs `prisma migrate deploy`.
 4. Load master data once, from a machine with the kit: `DATABASE_URL=<neon url> DATABASE_URL_UNPOOLED=<neon url> npm run db:seed -- --kit ./kit`. Or upload the CSVs on `/data` and add the PDF-only contracts on `/contracts`.
