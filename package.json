@@ -1,0 +1,48 @@
+{
+  "name": "corvo-pr-to-po",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Policy-driven PR-to-PO app for Corvo Engineering (Cantill.ai full-stack task)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "vercel-build": "prisma generate && prisma migrate deploy && next build",
+    "start": "next start",
+    "postinstall": "prisma generate",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "tsx scripts/seed.ts",
+    "batch": "tsx scripts/run-batch.ts",
+    "preferred": "tsx scripts/preferred.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "chrono-node": "2.8.3",
+    "clsx": "2.1.1",
+    "lucide-react": "0.577.0",
+    "next": "15.5.29",
+    "papaparse": "5.5.3",
+    "react": "19.1.10",
+    "react-dom": "19.1.10",
+    "unpdf": "1.9.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "@types/papaparse": "5.3.16",
+    "@types/react": "19.1.17",
+    "@types/react-dom": "19.1.11",
+    "autoprefixer": "10.4.21",
+    "postcss": "8.5.6",
+    "prisma": "6.19.3",
+    "tailwindcss": "3.4.19",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

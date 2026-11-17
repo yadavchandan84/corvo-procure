@@ -1,0 +1,253 @@
+// Corvo PR-to-PO: data model
+// Dates from the business data (PO dates, contract dates, PR timestamps) are stored as ISO strings
+// ('YYYY-MM-DD' / 'YYYY-MM-DD HH:mm', IST wall-clock) on purpose: they carry no timezone in the
+// source data and the policy works in calendar days. System timestamps use DateTime.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------- Master data ----------
+
+model Item {
+  code          String @id
+  description   String
+  uom           String
+  category      String
+  itemType      String
+  standardPrice Float
+}
+
+model Supplier {
+  id            String   @id
+  name          String
+  city          String
+  categories    String[]
+  status        String
+  onTimePct     Float
+  qualityRating Float
+}
+
+model Plant {
+  code String @id
+  name String
+}
+
+model PoHistory {
+  poNumber        String  @id
+  poDate          String
+  supplierId      String
+  itemCode        String
+  quantity        Float
+  uom             String
+  unitPrice       Float
+  plant           String
+  deliveredOnTime Boolean
+
+  @@index([itemCode, poDate])
+}
+
+enum ContractSource {
+  REGISTER
+  PDF
+  MANUAL
+}
+
+model Contract {
+  id            String         @id
+  supplierId    String
+  supplierName  String
+  startDate     String
+  endDate       String
+  valueCap      Float
+  consumedValue Float
+  source        ContractSource
+  fileName      String?
+  extractedText String?
+  addedBy       String?
+  createdAt     DateTime       @default(now())
+  lines         ContractLine[]
+}
+
+model ContractLine {
+  id          String   @id @default(cuid())
+  contractId  String
+  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  itemCode    String
+  description String
+  uom         String
+  rate        Float
+
+  @@index([itemCode])
+}
+
+// ---------- Policy (versioned, dated, approved) ----------
+
+enum PolicyStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+}
+
+model PolicyVersion {
+  id            String       @id @default(cuid())
+  version       String
+  effectiveFrom String
+  status        PolicyStatus @default(DRAFT)
+  definition    Json
+  /// Plain-language list of changes vs the parent version, shown before approval
+  changeSummary Json?
+  /// How the draft was created: SEED, DOCUMENT, CHAT, EDITOR
+  sourceType    String
+  sourceName    String?
+  sourceText    String?
+  /// Notes from the AI reader: clauses it could not represent, assumptions it made
+  aiNotes       Json?
+  parentId      String?
+  createdBy     String
+  createdAt     DateTime     @default(now())
+  approvedBy    String?
+  approvedAt    DateTime?
+  rejectedBy    String?
+  rejectedAt    DateTime?
+  reviewComment String?
+
+  @@index([status, effectiveFrom])
+}
+
+// ---------- Purchase requisitions ----------
+
+model PrBatch {
+  id         String   @id @default(cuid())
+  name       String
+  /// UPLOAD (CSV), CHAT (live intake), API
+  source     String
+  uploadedBy String
+  createdAt  DateTime @default(now())
+  lines      PrLine[]
+  runs       DecisionRun[]
+}
+
+model PrLine {
+  id                 String   @id @default(cuid())
+  batchId            String
+  batch              PrBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  prNo               String
+  prLine             String
+  createdAt          String
+  requester          String
+  department         String
+  plant              String
+  itemCode           String
+  description        String
+  quantity           String
+  uom                String
+  estimatedUnitPrice String
+  needByDate         String
+  urgency            String
+  insertedAt         DateTime @default(now())
+
+  @@unique([batchId, prNo, prLine])
+}
+
+// ---------- Decisions ----------
+
+model DecisionRun {
+  id              String         @id @default(cuid())
+  batchId         String
+  batch           PrBatch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  label           String
+  /// EFFECTIVE_DATE (version in force on each requirement date) or FORCED
+  policyMode      String
+  forcedVersionId String?
+  versionsUsed    String[]
+  summary         Json
+  result          Json
+  createdBy       String
+  createdAt       DateTime       @default(now())
+  actions         BuyerAction[]
+  documents       Document[]
+}
+
+model BuyerAction {
+  id        String      @id @default(cuid())
+  runId     String
+  run       DecisionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  groupId   String
+  /// APPROVE, OVERRIDE, REJECT
+  action    String
+  actor     String
+  comment   String?
+  /// For overrides: { original: {...}, override: {...} }
+  payload   Json?
+  createdAt DateTime    @default(now())
+
+  @@index([runId, groupId])
+}
+
+model Document {
+  id         String      @id @default(cuid())
+  runId      String
+  run        DecisionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  /// PO, RFQ, RFP, CAPEX_SOURCING, NEW_ITEM_SOURCING
+  type       String
+  number     String      @unique
+  supplierId String?
+  groupIds   String[]
+  lineKeys   String[]
+  totalValue Float?
+  payload    Json
+  createdBy  String
+  createdAt  DateTime    @default(now())
+}
+
+// ---------- Chat ----------
+
+model ChatSession {
+  id        String        @id @default(cuid())
+  /// REQUESTER or PROCUREMENT
+  kind      String
+  user      String
+  state     Json
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id        String      @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String
+  content   String
+  meta      Json?
+  createdAt DateTime    @default(now())
+
+  @@index([sessionId, createdAt])
+}
+
+// ---------- Audit and counters ----------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  at         DateTime @default(now())
+  actor      String
+  action     String
+  entityType String
+  entityId   String
+  details    Json?
+
+  @@index([entityType, entityId])
+  @@index([at])
+}
+
+model Counter {
+  name  String @id
+  value Int
+}
