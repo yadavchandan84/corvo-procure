@@ -22,7 +22,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://corvo:corvo@db:5432/corvo
-      DIRECT_URL: postgresql://corvo:corvo@db:5432/corvo
+      DATABASE_URL_UNPOOLED: postgresql://corvo:corvo@db:5432/corvo
       # Optional AI for chat and policy reading (any one of these)
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
