@@ -138,6 +138,8 @@ model PrLine {
   id                 String   @id @default(cuid())
   batchId            String
   batch              PrBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  /// Position in the uploaded file, so re-runs keep the input order
+  seq                Int      @default(0)
   prNo               String
   prLine             String
   createdAt          String

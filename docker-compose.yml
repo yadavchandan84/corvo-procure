@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: corvo
+      POSTGRES_PASSWORD: corvo
+      POSTGRES_DB: corvo
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corvo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://corvo:corvo@db:5432/corvo
+      DIRECT_URL: postgresql://corvo:corvo@db:5432/corvo
+      # Optional AI for chat and policy reading (any one of these)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Mount the task kit to auto-load master data on first start (optional)
+      KIT_DIR: /kit
+    volumes:
+      - ./kit:/kit:ro
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

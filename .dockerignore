@@ -1,0 +1,8 @@
+node_modules
+.next
+.git
+kit
+tmp
+.env
+.env.local
+submission

@@ -246,6 +246,8 @@ export function rankItems(text: string, index: ItemIndex, limit = 5) {
 
 export function matchItem(itemCode: string, description: string, index: ItemIndex, opts: MatchOptions): MatchResult {
   const code = (itemCode ?? '').trim().toUpperCase();
+  // the requester (or the chat, after asking) explicitly said this is a new item
+  if (code === 'NEW') return { itemCode: null, method: 'new', score: 0, candidates: [], note: 'Marked as a new item by the requester.' };
   if (code && opts.useRequesterCode) {
     const item = index.byCode.get(code);
     if (item) return { itemCode: item.code, method: 'code', score: 1, candidates: [{ itemCode: item.code, description: item.description, score: 1 }] };
