@@ -151,9 +151,17 @@ Open <http://localhost:3000>. On first start the app sets up the database, loads
 <details>
 <summary><b>Developer setup</b></summary>
 
+Create a `.env` file in the project root (it is git-ignored) pointing at the local Docker database:
+
+```bash
+DATABASE_URL=postgresql://corvo:corvo@localhost:5433/corvo
+DATABASE_URL_UNPOOLED=postgresql://corvo:corvo@localhost:5433/corvo
+```
+
+Then:
+
 ```bash
 npm install
-cp .env.example .env              # local database settings only, no secrets
 docker compose up -d db
 npx prisma migrate deploy
 npm run db:seed -- --kit ./kit    # master data, contracts, policy v5.0
