@@ -51,7 +51,7 @@ async function pickAvailableModel(cfg: LlmConfig, exclude: Set<string> = new Set
     const data = (await res.json()) as { data?: { id: string }[] };
     const ids = (data.data ?? []).map((m) => m.id.replace(/^models\//, ''));
     const usable = ids.filter((id) => !exclude.has(id) && !/(image|tts|audio|embed|vision|live|veo|imagen|aqa|learnlm|robotics|computer|gemma|omni|pro)/i.test(id));
-    // prefer the plain "flash-latest" / "flash-lite-latest" aliases, then numbered stable flash models
+    // prefer the "latest" aliases, then stable flash models; newest version first within a group
     const score = (id: string) =>
       (/^gemini-flash-latest$/.test(id) ? 10 : /^gemini-flash-lite-latest$/.test(id) ? 9 : 0) +
       (/flash/i.test(id) ? 4 : /mini|small|instant/i.test(id) ? 3 : 1) -
@@ -69,6 +69,7 @@ export async function llmJson<T = unknown>(system: string, user: string, opts: L
   const started = Date.now();
   const budget = opts.timeoutMs ?? 50000;
   const unusable = new Set<string>();
+  const busy = new Set<string>();
   let model = resolvedModel ?? cfg.model;
   const errors: string[] = [];
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -87,8 +88,11 @@ export async function llmJson<T = unknown>(system: string, user: string, opts: L
         if (!alt) break;
         model = alt;
       } else if (e instanceof TransientError) {
-        // overloaded or rate limited: wait briefly and retry the same model
-        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+        // overloaded or rate limited: move on to another model (busy models are only skipped for this call)
+        busy.add(model);
+        const alt = await pickAvailableModel(cfg, new Set([...unusable, ...busy]));
+        if (alt) model = alt;
+        else await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
       } else if ((e as Error).name === 'AbortError') {
         break; // out of time
       } else throw e;
