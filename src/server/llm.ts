@@ -38,13 +38,13 @@ export function llmInfo() {
 let resolvedModel: string | null = null;
 
 /** When the configured model is retired or unknown, pick an available text model from the provider's list. */
-async function pickAvailableModel(cfg: LlmConfig): Promise<string | null> {
+async function pickAvailableModel(cfg: LlmConfig, exclude: Set<string> = new Set()): Promise<string | null> {
   try {
     const res = await fetch(`${cfg.baseUrl}/models`, { headers: { Authorization: `Bearer ${cfg.apiKey}` } });
     if (!res.ok) return null;
     const data = (await res.json()) as { data?: { id: string }[] };
     const ids = (data.data ?? []).map((m) => m.id.replace(/^models\//, ''));
-    const usable = ids.filter((id) => !/(image|tts|audio|embed|vision|live|veo|imagen|aqa|learnlm|robotics|computer)/i.test(id));
+    const usable = ids.filter((id) => !exclude.has(id) && !/(image|tts|audio|embed|vision|live|veo|imagen|aqa|learnlm|robotics|computer|gemma)/i.test(id));
     const score = (id: string) =>
       (/flash/i.test(id) ? 4 : /mini|small|instant/i.test(id) ? 3 : 1) - (/lite|nano/i.test(id) ? 1 : 0) - (/preview|exp/i.test(id) ? 2 : 0) + (/latest/i.test(id) ? 1 : 0);
     usable.sort((a, b) => score(b) - score(a) || b.localeCompare(a, undefined, { numeric: true }));
@@ -57,19 +57,39 @@ async function pickAvailableModel(cfg: LlmConfig): Promise<string | null> {
 export async function llmJson<T = unknown>(system: string, user: string, opts: { temperature?: number; timeoutMs?: number } = {}): Promise<T> {
   const cfg = llmConfig();
   if (!cfg) throw new Error('No AI provider is configured (set GEMINI_API_KEY, GROQ_API_KEY or OPENAI_API_KEY).');
-  const model = resolvedModel ?? cfg.model;
-  try {
-    return await callModel<T>(cfg, model, system, user, opts);
-  } catch (e) {
-    if (!(e instanceof ModelUnavailableError)) throw e;
-    const alt = await pickAvailableModel(cfg);
-    if (!alt || alt === model) throw new Error(`AI model ${model} is not available: ${e.message}`);
-    resolvedModel = alt;
-    return callModel<T>(cfg, alt, system, user, opts);
+  const started = Date.now();
+  const budget = opts.timeoutMs ?? 50000;
+  const tried = new Set<string>();
+  let model = resolvedModel ?? cfg.model;
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const left = budget - (Date.now() - started);
+    if (left < 4000) break;
+    try {
+      return await callModel<T>(cfg, model, system, user, { ...opts, timeoutMs: left });
+    } catch (e) {
+      lastError = e as Error;
+      tried.add(model);
+      if (e instanceof ModelUnavailableError) {
+        // retired or unknown model: switch for good
+        const alt = await pickAvailableModel(cfg, tried);
+        if (!alt) break;
+        resolvedModel = model = alt;
+      } else if (e instanceof TransientError) {
+        // overloaded or rate limited: wait briefly, then retry; from the second failure try another model
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        if (attempt >= 1) {
+          const alt = await pickAvailableModel(cfg, tried);
+          if (alt) model = alt;
+        }
+      } else throw e;
+    }
   }
+  throw lastError ?? new Error('The AI provider did not answer in time.');
 }
 
 class ModelUnavailableError extends Error {}
+class TransientError extends Error {}
 
 async function callModel<T>(cfg: LlmConfig, model: string, system: string, user: string, opts: { temperature?: number; timeoutMs?: number }): Promise<T> {
   const controller = new AbortController();
@@ -94,6 +114,7 @@ async function callModel<T>(cfg: LlmConfig, model: string, system: string, user:
       if (res.status === 404 || /not (found|available|supported)|no longer available|does not exist/i.test(body)) {
         throw new ModelUnavailableError(`${res.status}: ${body.slice(0, 200)}`);
       }
+      if (res.status === 429 || res.status >= 500) throw new TransientError(`AI provider busy (${res.status}): ${body.slice(0, 160)}`);
       throw new Error(`AI provider returned ${res.status}: ${body.slice(0, 300)}`);
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
