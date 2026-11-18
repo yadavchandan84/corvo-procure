@@ -76,7 +76,14 @@ export async function llmJson<T = unknown>(system: string, user: string, opts: L
     const left = budget - (Date.now() - started);
     if (left < 4000) break;
     try {
-      const out = await callModel<T>(cfg, model, system, user, { ...opts, timeoutMs: left });
+      let out: T;
+      try {
+        out = await callModel<T>(cfg, model, system, user, { ...opts, reasoning: opts.reasoning ?? 'low', timeoutMs: left });
+      } catch (e) {
+        // some models reject the reasoning setting; ask again without it
+        if (!(e instanceof BadRequestError)) throw e;
+        out = await callModel<T>(cfg, model, system, user, { ...opts, reasoning: undefined, timeoutMs: budget - (Date.now() - started) });
+      }
       resolvedModel = model; // remember only a model that actually answered
       return out;
     } catch (e) {
@@ -113,7 +120,7 @@ export async function llmSelfCheck() {
   } catch {}
   const t0 = Date.now();
   try {
-    const r = await llmJson<{ ok?: boolean }>('Reply with the JSON object {"ok": true}.', 'ping', { timeoutMs: 30000, reasoning: 'none' });
+    const r = await llmJson<{ ok?: boolean }>('Reply with the JSON object {"ok": true}.', 'ping', { timeoutMs: 30000 });
     return { enabled: true, provider: cfg.provider, configured: cfg.model, used: resolvedModel, ok: r?.ok === true, ms: Date.now() - t0, models };
   } catch (e) {
     return { enabled: true, provider: cfg.provider, configured: cfg.model, ok: false, error: (e as Error).message.slice(0, 1500), models };
@@ -122,6 +129,7 @@ export async function llmSelfCheck() {
 
 class ModelUnavailableError extends Error {}
 class TransientError extends Error {}
+class BadRequestError extends Error {}
 
 async function callModel<T>(cfg: LlmConfig, model: string, system: string, user: string, opts: LlmOptions): Promise<T> {
   const controller = new AbortController();
@@ -133,7 +141,7 @@ async function callModel<T>(cfg: LlmConfig, model: string, system: string, user:
       body: JSON.stringify({
         model,
         // reading text into JSON needs little reasoning; long "thinking" only adds latency
-        ...(cfg.provider === 'gemini' ? { reasoning_effort: opts.reasoning ?? 'low' } : {}),
+        ...(cfg.provider === 'gemini' && opts.reasoning !== undefined ? { reasoning_effort: opts.reasoning } : {}),
         temperature: opts.temperature ?? 0,
         response_format: { type: 'json_object' },
         messages: [
@@ -148,6 +156,7 @@ async function callModel<T>(cfg: LlmConfig, model: string, system: string, user:
       if (res.status === 404 || /not (found|available|supported)|no longer available|does not exist/i.test(body)) {
         throw new ModelUnavailableError(`${res.status}: ${body.slice(0, 200)}`);
       }
+      if (res.status === 400 && opts.reasoning !== undefined) throw new BadRequestError(body.slice(0, 200));
       if (res.status === 429 && /limit: 0\b/.test(body)) throw new ModelUnavailableError(`model ${model} is not included in this plan: ${body.replace(/\s+/g, ' ').slice(0, 200)}`);
       if (res.status === 429 || res.status >= 500) throw new TransientError(`AI provider busy (${res.status}, model ${model}): ${body.replace(/\s+/g, ' ').slice(0, 700)}`);
       throw new Error(`AI provider returned ${res.status}: ${body.slice(0, 300)}`);
