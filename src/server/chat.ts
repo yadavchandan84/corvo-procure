@@ -58,7 +58,7 @@ async function aiSlots(message: string, today: string, awaiting?: string): Promi
     const r = await llmJson<Record<string, unknown>>(
       `Extract purchase request details from an employee's chat message at an engineering factory. Plants: PUN1 (Bhosari, Pune) and CHK1 (Chakan). Return JSON {"item_text": string|null (the item as described, without quantity, plant, date or filler words), "quantity": number|null, "uom": string|null, "plant": "PUN1"|"CHK1"|null, "need_by": "YYYY-MM-DD"|null, "urgency": "Normal"|"Emergency"|null, "estimated_unit_price": number|null}. Only fill what the message states. Never guess item codes. Today is ${today}.${awaiting ? ` The assistant had just asked for: ${awaiting}.` : ''}`,
       message,
-      { timeoutMs: 12000 },
+      { timeoutMs: 7000 },
     );
     const s: Slots = {};
     if (typeof r.item_text === 'string' && r.item_text.trim()) s.itemText = r.item_text.trim();
@@ -193,7 +193,10 @@ export async function handleChat(params: { sessionId?: string | null; message: s
     if (bare && state.awaiting === 'quantity') slots = { quantity: Number(bare[1].replace(/,/g, '')), uom: bare[2]?.toUpperCase() };
     if (state.awaiting === 'urgency' && /\bno\b|not/i.test(message) && !slots.urgency) slots.urgency = 'Normal';
     if (state.awaiting === 'urgency' && /\byes\b/i.test(message) && !slots.urgency) slots.urgency = 'Emergency';
-    const ai = await aiSlots(message, today, state.awaiting);
+    // the AI only helps with free-form descriptions; short answers to a question are parsed locally,
+    // so a slow or busy AI never slows down the conversation
+    const freeForm = !state.awaiting || state.awaiting === 'item';
+    const ai = freeForm ? await aiSlots(message, today, state.awaiting) : {};
     slots = { ...ai, ...Object.fromEntries(Object.entries(slots).filter(([, v]) => v !== undefined)), itemText: ai.itemText ?? slots.itemText };
     if (state.awaiting && !['item', 'item_choice', 'new_item_confirm'].includes(state.awaiting) && (d.itemCode || d.isNew)) {
       // while answering another question, leftover words are not a new item

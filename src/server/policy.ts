@@ -45,7 +45,8 @@ export async function createDraft(input: CreateDraftInput) {
     aiNotes = { reader: 'editor', warnings: v.warnings };
   } else {
     if (!input.text || input.text.trim().length < 10) throw new HttpError(400, 'Describe the change or upload the amendment document.');
-    const p = await proposePolicyChange({ version: base.version, effectiveFrom: base.effectiveFrom, definition: baseDef }, input.text, input.sourceType === 'DOCUMENT' ? 'document' : 'chat');
+    const categories = (await prisma.item.findMany({ select: { category: true }, distinct: ['category'] })).map((i) => i.category);
+    const p = await proposePolicyChange({ version: base.version, effectiveFrom: base.effectiveFrom, definition: baseDef }, input.text, input.sourceType === 'DOCUMENT' ? 'document' : 'chat', categories);
     definition = p.definition;
     summary = p.summary;
     version = version || p.version || '';
@@ -107,6 +108,15 @@ export async function approveDraft(id: string, user: string, comment?: string) {
   const updated = await prisma.policyVersion.update({ where: { id }, data: { status: 'APPROVED', approvedBy: user, approvedAt: new Date(), reviewComment: comment ?? null } });
   await audit(user, 'POLICY_APPROVED', 'PolicyVersion', id, { version: d.version, effectiveFrom: d.effectiveFrom, comment });
   return updated;
+}
+
+/** Discard a draft or rejected version that was never used. Approved versions are kept forever. */
+export async function discardVersion(id: string, user: string) {
+  const d = await prisma.policyVersion.findUnique({ where: { id } });
+  if (!d) throw new HttpError(404, 'Version not found');
+  if (d.status === 'APPROVED') throw new HttpError(409, 'Approved versions are part of the decision history and cannot be deleted.');
+  await prisma.policyVersion.delete({ where: { id } });
+  await audit(user, 'POLICY_DRAFT_DISCARDED', 'PolicyVersion', id, { version: d.version, status: d.status, sourceName: d.sourceName });
 }
 
 export async function rejectDraft(id: string, user: string, comment: string) {

@@ -131,6 +131,11 @@ function PolicyVersion({ id }: { id: string }) {
       router.push(`/policy/${d.id}`);
     }
   });
+  const discard = () => call('discard', async () => {
+    if (!window.confirm(`Delete v${v.version} (${v.status.toLowerCase()})? This cannot be undone.`)) return;
+    await api(`/api/policy/${id}`, { method: 'DELETE' });
+    router.push('/policy');
+  });
   const decide = (action: 'APPROVE' | 'REJECT') => call(action, async () => {
     await api(`/api/policy/${id}`, { method: 'POST', body: JSON.stringify({ action, comment }) });
     await load();
@@ -169,7 +174,18 @@ function PolicyVersion({ id }: { id: string }) {
           {v.reviewComment ? ` Comment: “${v.reviewComment}”` : ''}
         </InfoBox>
       )}
-      {v.status === 'REJECTED' && <InfoBox tone="warn">Rejected by {v.rejectedBy}: “{v.reviewComment}”</InfoBox>}
+      {v.status === 'REJECTED' && (
+        <InfoBox tone="warn">
+          <div className="flex items-center justify-between gap-3">
+            <span>
+              Rejected by {v.rejectedBy}: “{v.reviewComment}”
+            </span>
+            <button className="btn-danger" disabled={!!busy} onClick={discard}>
+              Delete this version
+            </button>
+          </div>
+        </InfoBox>
+      )}
 
       {isDraft && (
         <div className="card mb-6 p-5">
@@ -298,6 +314,9 @@ function PolicyVersion({ id }: { id: string }) {
             </button>
             <button className="btn-danger" disabled={!!busy || !comment.trim()} onClick={() => decide('REJECT')}>
               <X size={16} /> Reject
+            </button>
+            <button className="btn-secondary ml-auto" disabled={!!busy} onClick={discard}>
+              Discard draft
             </button>
           </div>
         </div>

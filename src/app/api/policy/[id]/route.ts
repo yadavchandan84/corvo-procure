@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { actor, handle } from '@/server/http';
 import { prisma } from '@/server/db';
-import { approveDraft, impactPreview, rejectDraft, updateDraft } from '@/server/policy';
+import { approveDraft, discardVersion, impactPreview, rejectDraft, updateDraft } from '@/server/policy';
 import { HttpError } from '@/server/runs';
 import { validatePolicy } from '@/engine/policy/validate';
 import { describeRule } from '@/engine/policy/diff';
@@ -37,4 +37,11 @@ export const POST = handle(async (req: Request, { params }: { params: Promise<{ 
     return NextResponse.json(await rejectDraft(id, actor(req), body.comment));
   }
   throw new HttpError(400, 'Unknown action');
+});
+
+/** Discard a draft or rejected version (approved versions cannot be deleted). */
+export const DELETE = handle(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const { id } = await params;
+  await discardVersion(id, actor(req));
+  return NextResponse.json({ ok: true });
 });

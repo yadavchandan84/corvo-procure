@@ -1,8 +1,9 @@
 import * as chrono from 'chrono-node';
 import { llmConfig, llmJson } from './llm';
 import { FACTS } from '@/engine/policy/facts';
-import { KNOWN_ROUTES, type PolicyDefinition, type PolicyRule } from '@/engine/policy/schema';
+import { KNOWN_ROUTES, type Condition, type PolicyDefinition, type PolicyRule } from '@/engine/policy/schema';
 import { validatePolicy } from '@/engine/policy/validate';
+import { applyEdits, type PolicyEdit } from '@/engine/policy/edits';
 import { parseDate, todayIST } from '@/engine/dates';
 
 export interface DraftProposal {
@@ -17,67 +18,77 @@ export interface DraftProposal {
   validationWarnings: string[];
 }
 
-const SYSTEM = `You convert procurement policy amendments into an updated machine-readable policy for Corvo Engineering's PR-to-PO decision engine.
-You receive the CURRENT policy definition (JSON), the FACTS that rule conditions may use, and an AMENDMENT (a document, or a change described in chat by Procurement).
+
+const SYSTEM = `You turn procurement policy amendments into a short list of EDITS to Corvo Engineering's machine-readable policy.
+You receive the CURRENT policy (JSON), the FACTS rule conditions may use, and an AMENDMENT (a document, or a change Procurement described in chat).
 
 Return ONLY a JSON object:
 {
-  "version": "new version label, e.g. \\"5.1\\" (use the number in the amendment if it states one, else bump the minor number)",
+  "version": "new version label (use the amendment's number if stated, else bump the minor number, e.g. 5.0 -> 5.1)",
   "effectiveFrom": "YYYY-MM-DD from the amendment, or null if it does not say",
-  "summary": ["one plain-language sentence per change, in the amendment's own terms"],
-  "definition": { the COMPLETE updated policy definition, same shape as CURRENT },
-  "unrepresentable": ["parts of the amendment that cannot be expressed with this schema and facts; empty if none"],
-  "assumptions": ["interpretations you had to make; empty if none"]
+  "summary": ["one plain sentence per change, in the amendment's terms"],
+  "edits": [ ...edits, see below ],
+  "unrepresentable": ["parts that cannot be expressed with these edits and facts; [] if none"],
+  "assumptions": ["interpretations you had to make; [] if none"]
 }
 
-How the engine uses the definition:
-- scope.plants: lines for other plants are NOT_PROCESSED. intake.*: line validation.
-- clubbing (2.2): creationWindowDays, needByWindowDays, sameFields. valuation (3.1): priceSources order, lastPoLookbackDays.
-- contracts (4.x): requireEligibleSupplier, enforceCeiling, minHeadroomPctAfter (0-100), excludeIfEndsWithinDays, selection.
-- eligibility (4.1/5.7/6.x): allowedStatuses, minOnTimePct, minQualityRating, excludedSupplierIds, statusOverrides {"S013":"Blocked"}.
-- rules (section 5): evaluated top to bottom for each requirement; the FIRST enabled rule whose "when" holds decides. ORDER MATTERS.
-  Condition grammar: {"all":[...]}, {"any":[...]}, {"not":{...}}, {"always":true}, {"fact":"<name>","op":"<op>","value":<v>}.
-  ops: eq, neq, lt, lte, gt, gte, in, not_in, contains, is_true, is_false, exists, not_exists. is_true/is_false/exists take no value.
-  outcome: {"decision":"PO"|"SOURCING_REQUEST"|"NOT_PROCESSED","route":one of ${KNOWN_ROUTES.join(', ')},"supplier":"contract"|"preferred_1"|"none","suggestCount":n,"approvals":[...]}
-  supplier "contract" = supplier of the usable contract at contract rate (only meaningful with contract_usable); "preferred_1" = 1st preferred supplier at its reference price; sourcing uses "none".
-- preferredSuppliers (6.x): lookbackDays, includeContractHolders, recencyBands, weights, referencePriceLookbackDays. suggestions (6.4). consolidation (7.1): windowHours, sameFields, maxRequirementsPerPo.
+EDITS (apply only what the amendment changes):
+- {"op":"set","path":"clubbing.creationWindowDays","value":21}   parameter change; path is a dotted path that exists in CURRENT (never "rules")
+- {"op":"set_condition_value","ruleId":"R5.4","fact":"value","value":250000}   change a limit inside a rule (optional "whereOp":"lt" to pick one condition)
+- {"op":"add_rule","rule":{RULE},"after":"R5.2"}   or "before":"R5.3"; ORDER MATTERS, the first matching rule decides
+- {"op":"update_rule","ruleId":"R5.5","changes":{"when":{...}}}   may change title, clause, when, outcome, enabled
+- {"op":"remove_rule","ruleId":"..."}   {"op":"move_rule","ruleId":"...","before":"..."}
 
-Rules for editing:
-- Money is plain INR numbers: Rs 2,00,000 = 200000; 1 lakh = 100000; 10 lakh = 1000000; 1 crore = 10000000.
+RULE = {"id":"R5.2A","clause":"5.2A","title":"short title","when":CONDITION,"outcome":OUTCOME}
+CONDITION = {"all":[...]} | {"any":[...]} | {"not":{...}} | {"fact":"<fact name>","op":"<op>","value":<v>}
+  ops: eq, neq, lt, lte, gt, gte, in, not_in, contains, is_true, is_false, exists, not_exists (is_true/is_false/exists/not_exists take no value)
+OUTCOME = {"decision":"PO"|"SOURCING_REQUEST","route":one of ${KNOWN_ROUTES.join(', ')},"supplier":"contract"|"preferred_1"|"none","suggestCount":n,"approvals":[]}
+  PO routes need supplier "contract" (only with contract_usable) or "preferred_1" (1st preferred supplier); sourcing uses "none" with suggestCount 3 (RFQ) or 5 (RFP/Capex).
+
+Current rule order (ids): R1.2 new item, R5.1 capex, R5.2 contract, R5.3 emergency, R5.4 spot, R5.5 RFQ (value lt 1000000), R5.6 RFP (value gte 1000000).
+
+Guidance:
+- Money is plain INR: Rs 2,00,000 = 200000; 1 lakh = 100000; 10 lakh = 1000000; 1 crore = 10000000.
 - "bought from an Active supplier in the last N days" = {"fact":"days_since_last_eligible_purchase","op":"lte","value":N}.
-- A plant-, category-, item-type- or department-specific exception is a NEW rule placed BEFORE the general rule it overrides (or an added condition on that rule) so the general rule still applies everywhere else. Make sure the exception cannot be "caught" by an earlier rule unintentionally and that the general rule no longer catches the excepted cases when it should not.
-- When a threshold changes, update every condition that uses it consistently (e.g. the RFQ/RFP boundary is "value lt X" in 5.5 and "value gte X" in 5.6).
-- Change nothing the amendment does not mention. Keep ids of existing rules. New rules get a new unique id (e.g. "R5.3A") and a clause label from the amendment's numbering if it has one.
-- Use only facts from the FACTS list. If something cannot be expressed, put it in "unrepresentable" instead of inventing fields.`;
+- A plant/category/item-type/department exception is a NEW rule placed before the general rule it overrides. "Unless a contract can be used" means place it after R5.2.
+- When a threshold moves, change every condition that uses it (the RFQ/RFP boundary is in both R5.5 and R5.6).
+- Plant codes: PUN1 (Bhosari, Pune), CHK1 (Chakan). Category names must match the item master exactly, e.g. "Safety & PPE".
+- Use only the listed facts. Put anything you cannot express in "unrepresentable" instead of guessing.`;
 
 function factsList(): string {
-  return FACTS.map((f) => `- ${f.name} (${f.type}): ${f.label}. ${f.description}`).join('\n');
+  return FACTS.map((f) => `- ${f.name} (${f.type}): ${f.description}${f.options ? ` Values: ${f.options.join(', ')}.` : ''}`).join('\n');
 }
 
-export async function proposeWithAi(current: { version: string; effectiveFrom: string; definition: PolicyDefinition }, amendment: string, mode: 'document' | 'chat'): Promise<DraftProposal> {
+export async function proposeWithAi(
+  current: { version: string; effectiveFrom: string; definition: PolicyDefinition },
+  amendment: string,
+  mode: 'document' | 'chat',
+  categories: string[] = [],
+): Promise<DraftProposal> {
   const user = `TODAY: ${todayIST()}
 CURRENT POLICY: version ${current.version}, effective ${current.effectiveFrom}
 ${JSON.stringify(current.definition)}
 
 FACTS:
 ${factsList()}
-
+${categories.length ? `\nITEM CATEGORIES: ${categories.join('; ')}\n` : ''}
 AMENDMENT (${mode === 'document' ? 'uploaded document' : 'described in chat by Procurement'}):
 """
 ${amendment.slice(0, 30000)}
 """`;
-  let last: Record<string, unknown> | null = null;
-  let errors: string[] = [];
+  let problems: string[] = [];
   const started = Date.now();
   for (let attempt = 0; attempt < 2; attempt++) {
-    // stay inside the 120 s function limit, leaving time for the built-in reader fallback
-    const left = 100000 - (Date.now() - started);
-    if (attempt > 0 && left < 30000) break;
-    const prompt = attempt === 0 ? user : `${user}\n\nYour previous answer failed validation:\n${errors.join('\n')}\nReturn the corrected full JSON object.`;
-    last = await llmJson<Record<string, unknown>>(SYSTEM, prompt, { timeoutMs: left });
-    const v = validatePolicy(last.definition);
-    errors = v.errors;
-    if (v.ok && v.definition) {
+    // stay inside the function time limit, leaving time for the built-in reader fallback
+    const left = 90000 - (Date.now() - started);
+    if (attempt > 0 && left < 25000) break;
+    const prompt = attempt === 0 ? user : `${user}\n\nYour previous edits had problems:\n${problems.join('\n')}\nReturn the corrected JSON object.`;
+    const last = await llmJson<Record<string, unknown>>(SYSTEM, prompt, { timeoutMs: left });
+    const edits = Array.isArray(last.edits) ? (last.edits as PolicyEdit[]) : [];
+    const applied = applyEdits(current.definition, edits);
+    const v = validatePolicy(applied.definition);
+    problems = [...applied.problems, ...v.errors];
+    if (v.ok && v.definition && !applied.problems.length) {
       return {
         version: typeof last.version === 'string' ? last.version : null,
         effectiveFrom: parseDate(typeof last.effectiveFrom === 'string' ? last.effectiveFrom : null),
@@ -91,7 +102,7 @@ ${amendment.slice(0, 30000)}
       };
     }
   }
-  throw new Error(`The AI could not produce a valid policy: ${errors.join('; ')}`);
+  throw new Error(`The AI could not produce valid edits: ${problems.join('; ').slice(0, 600)}`);
 }
 
 function arr(v: unknown): string[] {
@@ -139,10 +150,13 @@ function findValueCond(rule: PolicyRule | undefined, op?: string) {
  * Handles the common, well-phrased changes: limits, windows, lookbacks, suggestion counts and
  * plant-only limits. Anything it does not understand is reported, never guessed.
  */
-export function proposeWithRules(current: { version: string; definition: PolicyDefinition }, text: string): DraftProposal {
+export function proposeWithRules(current: { version: string; definition: PolicyDefinition }, text: string, categories: string[] = []): DraftProposal {
   const def = JSON.parse(JSON.stringify(current.definition)) as PolicyDefinition;
   const summary: string[] = [];
   const unrepresentable: string[] = [];
+  const assumptions: string[] = [];
+  let lastAdded: PolicyRule | null = null;
+  const ruleByClause = (c: string) => def.rules.find((r) => r.clause === c || r.id === `R${c}`);
   const sentences = text
     .split(/(?<=[.;\n])\s+|\n+/)
     .map((s) => s.trim())
@@ -167,7 +181,57 @@ export function proposeWithRules(current: { version: string; definition: PolicyD
     const hours = s.match(/(\d+)\s*hours?/i)?.[1];
     const val = /limit|threshold|below|above|up to|upto|ceiling|₹|rs|lakh|inr/i.test(s) ? amount(s.replace(/\d+\s*(days?|hours?)/gi, '')) : null;
 
-    if (/spot/.test(lower) && val) {
+    const category = [...categories].sort((a, b) => b.length - a.length).find((c) => lower.includes(c.toLowerCase())) ?? null;
+    const itemType = s.match(/\b(capex|service|material)\b\s+items?/i)?.[1] ?? null;
+    const route = /\brfp\b|formal tender/i.test(s) ? 'RFP' : /\brfq\b|quotes?|quotation/i.test(s) ? 'RFQ' : null;
+    const placement = /\b(after|before)\b[^.;]*?\d+\.\d+/i.test(s);
+
+    if (placement && lastAdded && /\b(apply|place|check|put|insert)\b|\bit\b/i.test(s)) {
+      // "Apply it after rule 5.2 and before rule 5.3": place the rule added just before this sentence
+      const after = s.match(/\bafter\b[^.;]*?(\d+\.\d+[a-z]?)/i)?.[1];
+      const before = s.match(/\bbefore\b[^.;]*?(\d+\.\d+[a-z]?)/i)?.[1];
+      const target = after ? ruleByClause(after) : before ? ruleByClause(before) : null;
+      if (target) {
+        def.rules = def.rules.filter((r) => r !== lastAdded);
+        const i = def.rules.indexOf(target);
+        def.rules.splice(after ? i + 1 : i, 0, lastAdded);
+        summary.push(`Rule ${lastAdded.clause} is checked ${after ? `after ${after}` : `before ${before}`}.`);
+        handled = true;
+      }
+    } else if (route && (plant || category || itemType) && (val !== null || /\balways\b|\ball\b/i.test(s)) && !/spot|emergency/i.test(lower)) {
+      // new kind of rule: "At CHK1, Safety & PPE items worth Rs 50,000 or more always go to RFQ"
+      const conds: Condition[] = [];
+      if (plant) conds.push({ fact: 'plant', op: 'eq', value: plant });
+      if (category) conds.push({ fact: 'category', op: 'eq', value: category });
+      if (itemType) conds.push({ fact: 'item_type', op: 'eq', value: itemType[0].toUpperCase() + itemType.slice(1).toLowerCase() });
+      if (val !== null) {
+        const op = /\b(below|under|less than|up to|upto|not more than)\b/i.test(s) ? (/up to|upto|not more than/i.test(s) ? 'lte' : 'lt') : /\b(above|more than|exceed\w*)\b/i.test(s) && !/or more/i.test(s) ? 'gt' : 'gte';
+        conds.push({ fact: 'value', op, value: val });
+      }
+      conds.push({ fact: 'is_new_item', op: 'is_false' });
+      const count = Number(s.match(/(\d+)\s+(?:suggested\s+)?suppliers?/i)?.[1] ?? (route === 'RFP' ? 5 : 3));
+      const n = def.rules.filter((r) => r.id.startsWith('R-A')).length + 1;
+      const label = s.match(/^\s*([A-Z]\d+(?:\.\d+)?)[.):]/)?.[1];
+      const newRule: PolicyRule = {
+        id: `R-A${n}`,
+        clause: label ?? `5.2${String.fromCharCode(64 + n)}`,
+        title: [plant, category ?? (itemType ? `${itemType} items` : null), route].filter(Boolean).join(' ') || 'Amendment rule',
+        description: s,
+        enabled: true,
+        when: { all: conds },
+        outcome: { decision: 'SOURCING_REQUEST', route, supplier: 'none', suggestCount: count, approvals: [] },
+      };
+      // default position: after the contract rule (a usable contract still wins) unless the sentence says otherwise
+      const contractWins = !/\beven if\b.*contract|\bincluding\b.*contract/i.test(s);
+      const anchor = rule(contractWins ? 'R5.2' : 'R5.1') ?? def.rules[0];
+      def.rules.splice(def.rules.indexOf(anchor) + 1, 0, newRule);
+      lastAdded = newRule;
+      if (!/unless .*contract/i.test(s) && contractWins) assumptions.push(`New rule ${newRule.clause} is placed after the contract rule 5.2, so a usable rate contract still applies first.`);
+      const valueOp = (conds.find((x) => 'fact' in x && x.fact === 'value') as { op?: string } | undefined)?.op;
+      const opText: Record<string, string> = { gte: 'of', gt: 'above', lt: 'below', lte: 'up to' };
+      summary.push(`New rule ${newRule.clause}: ${newRule.title}${val !== null ? ` for requirements ${opText[valueOp ?? 'gte']} ₹${val.toLocaleString('en-IN')}${valueOp === 'gte' ? ' or more' : ''}` : ''} go to ${route} with ${count} suggested suppliers.`);
+      handled = true;
+    } else if (/spot/.test(lower) && val) {
       const r5 = rule('R5.4');
       const c = findValueCond(r5);
       if (r5 && c) {
@@ -251,22 +315,30 @@ export function proposeWithRules(current: { version: string; definition: PolicyD
     summary,
     definition: v.definition ?? def,
     unrepresentable,
-    assumptions: ['Read by the built-in rule reader (no AI configured). Check every change below, and use the editor for anything listed as not understood.'],
+    assumptions: ['Read by the built-in rule reader. Check every change below, and use the editor for anything listed as not understood.', ...assumptions],
     reader: 'rules',
     validationErrors: v.errors,
     validationWarnings: v.warnings,
   };
 }
 
-export async function proposePolicyChange(current: { version: string; effectiveFrom: string; definition: PolicyDefinition }, text: string, mode: 'document' | 'chat'): Promise<DraftProposal> {
+export async function proposePolicyChange(
+  current: { version: string; effectiveFrom: string; definition: PolicyDefinition },
+  text: string,
+  mode: 'document' | 'chat',
+  categories: string[] = [],
+): Promise<DraftProposal> {
   if (llmConfig()) {
     try {
-      return await proposeWithAi(current, text, mode);
+      return await proposeWithAi(current, text, mode, categories);
     } catch (e) {
-      const fallback = proposeWithRules(current, text);
-      fallback.assumptions = [`The AI reader failed (${(e as Error).message.slice(0, 800)}), so the built-in rule reader was used. Check every change below, and use the editor for anything listed as not understood.`];
+      const fallback = proposeWithRules(current, text, categories);
+      fallback.assumptions = [
+        `The AI reader was not available (${(e as Error).message.slice(0, 300)}), so the built-in rule reader was used. Check every change below, and use the editor for anything listed as not understood.`,
+        ...fallback.assumptions.slice(1),
+      ];
       return fallback;
     }
   }
-  return proposeWithRules(current, text);
+  return proposeWithRules(current, text, categories);
 }
