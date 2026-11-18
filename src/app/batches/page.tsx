@@ -31,11 +31,16 @@ export default function BatchesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  // read after mount so the server and browser render the same HTML
+  const [origin, setOrigin] = useState('');
+  useEffect(() => setOrigin(window.location.origin), []);
 
   const load = () => api<Batch[]>('/api/batches').then(setBatches).catch((e) => setError(e.message));
   useEffect(() => {
     load();
-    api<{ versions: Version[] }>('/api/policy').then((r) => setVersions(r.versions.filter((v) => v.status === 'APPROVED')));
+    api<{ versions: Version[] }>('/api/policy')
+      .then((r) => setVersions(r.versions.filter((v) => v.status === 'APPROVED')))
+      .catch((e) => setError(e.message));
   }, []);
 
   async function upload() {
@@ -110,7 +115,7 @@ export default function BatchesPage() {
           </button>
         </div>
         <div className="muted mt-3 text-xs">
-          API: <code className="rounded bg-slate-100 px-1">curl -X POST --data-binary @batch.csv -H &quot;Content-Type: text/csv&quot; {typeof window !== 'undefined' ? window.location.origin : ''}/api/process-batch?format=csv</code>
+          API: <code className="rounded bg-slate-100 px-1">curl -X POST --data-binary @batch.csv -H &quot;Content-Type: text/csv&quot; {origin}/api/process-batch?format=csv</code>
         </div>
       </div>
 

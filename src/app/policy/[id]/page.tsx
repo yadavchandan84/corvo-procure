@@ -81,7 +81,9 @@ function PolicyVersion({ id }: { id: string }) {
   };
   useEffect(() => {
     load().catch((e) => setError(e.message));
-    api<{ facts: FactDef[] }>('/api/policy/facts').then((r) => setFacts(r.facts));
+    api<{ facts: FactDef[] }>('/api/policy/facts')
+      .then((r) => setFacts(r.facts))
+      .catch(() => setFacts([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 

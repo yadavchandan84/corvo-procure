@@ -41,7 +41,10 @@ export default function ChatPage() {
         .catch(() => localStorage.removeItem('corvo-chat'));
     }
   }, []);
-  useEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
+  // braces matter: newer browsers return a Promise from scrollIntoView, which React would treat as a cleanup
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   async function send(text: string) {
     if (!text.trim() || busy) return;
