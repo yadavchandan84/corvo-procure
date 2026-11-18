@@ -62,7 +62,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen">
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-slate-900 p-4 md:flex">
         <Link href="/" className="mb-6 block">
-          <div className="text-lg font-semibold text-white">Corvo Procure</div>
+          <div className="text-lg font-semibold text-white">Policy-Driven PR-to-PO</div>
           <div className="text-xs text-slate-400">PR to PO, policy driven</div>
         </Link>
         <nav className="flex-1 space-y-1">

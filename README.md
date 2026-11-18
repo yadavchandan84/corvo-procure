@@ -1,6 +1,6 @@
 <div align="center">
 
-# Corvo Procure
+# Policy-Driven PR-to-PO
 
 **Raise purchase requests by chat. Get decisions that follow the procurement policy.**
 **Change the policy as data, without touching code.**

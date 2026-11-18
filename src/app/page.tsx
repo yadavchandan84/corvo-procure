@@ -43,7 +43,7 @@ export default function Home() {
 
   return (
     <div>
-      <PageHeader title="Corvo Procure" subtitle="Purchase requests are raised by chat and decided by the procurement policy in force on each requirement date. The policy is data: a new version changes decisions without code changes." />
+      <PageHeader title="Policy-Driven PR-to-PO" subtitle="Purchase requests are raised by chat and decided by the procurement policy in force on each requirement date. The policy is data: a new version changes decisions without code changes." />
       {counts && counts.items === 0 && (
         <InfoBox tone="warn">
           No master data is loaded yet. Go to <Link className="font-medium underline" href="/data">Master data</Link> and upload the item master, supplier master, PO history, plants and contract register.

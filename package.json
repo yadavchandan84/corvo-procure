@@ -1,5 +1,5 @@
 {
-  "name": "corvo-pr-to-po",
+  "name": "policy-driven-pr-to-po",
   "version": "1.0.0",
   "private": true,
   "description": "Policy-driven PR-to-PO app for Corvo Engineering (Cantill.ai full-stack task)",

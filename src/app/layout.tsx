@@ -3,7 +3,7 @@ import './globals.css';
 import { Shell } from '@/components/Shell';
 
 export const metadata: Metadata = {
-  title: 'Corvo Procure: policy-driven PR to PO',
+  title: 'Policy-Driven PR-to-PO',
   description: 'Raise purchase requests by chat; decisions follow the versioned procurement policy.',
 };
 
