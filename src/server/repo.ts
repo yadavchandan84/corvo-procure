@@ -69,12 +69,23 @@ export function invalidateContext() {
 }
 
 /** Seed policy v5.0 as the first approved version if the store is empty. */
+const SEED_ID = 'seed-policy-v5-0';
+
 export async function ensureSeedPolicy(): Promise<void> {
+  const seeds = await prisma.policyVersion.findMany({ where: { sourceType: 'SEED' }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+  if (seeds.length > 1) {
+    // an earlier release could create the seed twice under concurrent first requests; keep the oldest
+    await prisma.policyVersion.deleteMany({ where: { id: { in: seeds.slice(1).map((s) => s.id) } } });
+  }
+  if (seeds.length > 0) return;
   const count = await prisma.policyVersion.count();
   if (count > 0) return;
   const def = parsePolicyDefinition(POLICY_V5);
-  const v = await prisma.policyVersion.create({
+  // fixed id: concurrent first requests cannot create two seed versions
+  const v = await prisma.policyVersion
+    .create({
     data: {
+      id: SEED_ID,
       version: POLICY_V5_VERSION,
       effectiveFrom: POLICY_V5_EFFECTIVE_FROM,
       status: 'APPROVED',
@@ -86,8 +97,9 @@ export async function ensureSeedPolicy(): Promise<void> {
       approvedBy: 'system (baseline)',
       approvedAt: new Date('2026-04-01T00:00:00+05:30'),
     },
-  });
-  await audit('system', 'POLICY_SEEDED', 'PolicyVersion', v.id, { version: POLICY_V5_VERSION });
+  })
+    .catch(() => null); // another request created it first
+  if (v) await audit('system', 'POLICY_SEEDED', 'PolicyVersion', v.id, { version: POLICY_V5_VERSION });
 }
 
 export function toRecord(v: { id: string; version: string; effectiveFrom: string; approvedAt: Date | null; definition: unknown }): PolicyVersionRecord {
