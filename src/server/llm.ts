@@ -122,7 +122,7 @@ async function callModel<T>(cfg: LlmConfig, model: string, system: string, user:
       if (res.status === 404 || /not (found|available|supported)|no longer available|does not exist/i.test(body)) {
         throw new ModelUnavailableError(`${res.status}: ${body.slice(0, 200)}`);
       }
-      if (res.status === 429 || res.status >= 500) throw new TransientError(`AI provider busy (${res.status}): ${body.slice(0, 160)}`);
+      if (res.status === 429 || res.status >= 500) throw new TransientError(`AI provider busy (${res.status}, model ${model}): ${body.replace(/\s+/g, ' ').slice(0, 700)}`);
       throw new Error(`AI provider returned ${res.status}: ${body.slice(0, 300)}`);
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };

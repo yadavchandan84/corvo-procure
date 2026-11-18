@@ -264,7 +264,7 @@ export async function proposePolicyChange(current: { version: string; effectiveF
       return await proposeWithAi(current, text, mode);
     } catch (e) {
       const fallback = proposeWithRules(current, text);
-      fallback.assumptions = [`The AI reader failed (${(e as Error).message.slice(0, 200)}), so the built-in rule reader was used. Check every change below, and use the editor for anything listed as not understood.`];
+      fallback.assumptions = [`The AI reader failed (${(e as Error).message.slice(0, 800)}), so the built-in rule reader was used. Check every change below, and use the editor for anything listed as not understood.`];
       return fallback;
     }
   }
