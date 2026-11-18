@@ -70,9 +70,9 @@ ${amendment.slice(0, 30000)}
   let errors: string[] = [];
   const started = Date.now();
   for (let attempt = 0; attempt < 2; attempt++) {
-    // stay inside the 60 s serverless limit, leaving time for the built-in reader fallback
-    const left = 50000 - (Date.now() - started);
-    if (attempt > 0 && left < 15000) break;
+    // stay inside the 120 s function limit, leaving time for the built-in reader fallback
+    const left = 100000 - (Date.now() - started);
+    if (attempt > 0 && left < 30000) break;
     const prompt = attempt === 0 ? user : `${user}\n\nYour previous answer failed validation:\n${errors.join('\n')}\nReturn the corrected full JSON object.`;
     last = await llmJson<Record<string, unknown>>(SYSTEM, prompt, { timeoutMs: left });
     const v = validatePolicy(last.definition);

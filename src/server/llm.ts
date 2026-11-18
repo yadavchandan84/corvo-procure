@@ -34,6 +34,12 @@ export function llmInfo() {
   return c ? { enabled: true, provider: c.provider, model: resolvedModel ?? c.model } : { enabled: false, provider: null, model: null };
 }
 
+export interface LlmOptions {
+  temperature?: number;
+  timeoutMs?: number;
+  reasoning?: 'none' | 'low' | 'medium' | 'high';
+}
+
 /** Model actually used, after any fallback; shared by warm server instances. */
 let resolvedModel: string | null = null;
 
@@ -54,7 +60,7 @@ async function pickAvailableModel(cfg: LlmConfig, exclude: Set<string> = new Set
   }
 }
 
-export async function llmJson<T = unknown>(system: string, user: string, opts: { temperature?: number; timeoutMs?: number } = {}): Promise<T> {
+export async function llmJson<T = unknown>(system: string, user: string, opts: LlmOptions = {}): Promise<T> {
   const cfg = llmConfig();
   if (!cfg) throw new Error('No AI provider is configured (set GEMINI_API_KEY, GROQ_API_KEY or OPENAI_API_KEY).');
   const started = Date.now();
@@ -91,7 +97,7 @@ export async function llmJson<T = unknown>(system: string, user: string, opts: {
 class ModelUnavailableError extends Error {}
 class TransientError extends Error {}
 
-async function callModel<T>(cfg: LlmConfig, model: string, system: string, user: string, opts: { temperature?: number; timeoutMs?: number }): Promise<T> {
+async function callModel<T>(cfg: LlmConfig, model: string, system: string, user: string, opts: LlmOptions): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 55000);
   try {
@@ -100,6 +106,8 @@ async function callModel<T>(cfg: LlmConfig, model: string, system: string, user:
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({
         model,
+        // reading text into JSON needs little reasoning; long "thinking" only adds latency
+        ...(cfg.provider === 'gemini' ? { reasoning_effort: opts.reasoning ?? 'low' } : {}),
         temperature: opts.temperature ?? 0,
         response_format: { type: 'json_object' },
         messages: [

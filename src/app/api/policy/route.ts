@@ -9,7 +9,8 @@ import { todayIST } from '@/engine/dates';
 import { llmInfo } from '@/server/llm';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+// reading an amendment with the AI can take more than a minute
+export const maxDuration = 120;
 
 /** List all versions (drafts, approved, rejected) with the one in force today marked. */
 export const GET = handle(async () => {
