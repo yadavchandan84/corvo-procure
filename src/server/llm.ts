@@ -17,7 +17,8 @@ export function llmConfig(): LlmConfig | null {
     return { baseUrl: env.LLM_BASE_URL.replace(/\/$/, ''), apiKey: env.LLM_API_KEY, model: env.LLM_MODEL || 'gpt-4o-mini', provider: 'custom' };
   }
   if (env.GEMINI_API_KEY) {
-    return { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', apiKey: env.GEMINI_API_KEY, model: env.LLM_MODEL || 'gemini-2.5-flash', provider: 'gemini' };
+    // alias that Google keeps pointing at the current stable Flash model
+    return { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', apiKey: env.GEMINI_API_KEY, model: env.LLM_MODEL || 'gemini-flash-latest', provider: 'gemini' };
   }
   if (env.GROQ_API_KEY) {
     return { baseUrl: 'https://api.groq.com/openai/v1', apiKey: env.GROQ_API_KEY, model: env.LLM_MODEL || 'llama-3.3-70b-versatile', provider: 'groq' };
@@ -30,12 +31,47 @@ export function llmConfig(): LlmConfig | null {
 
 export function llmInfo() {
   const c = llmConfig();
-  return c ? { enabled: true, provider: c.provider, model: c.model } : { enabled: false, provider: null, model: null };
+  return c ? { enabled: true, provider: c.provider, model: resolvedModel ?? c.model } : { enabled: false, provider: null, model: null };
+}
+
+/** Model actually used, after any fallback; shared by warm server instances. */
+let resolvedModel: string | null = null;
+
+/** When the configured model is retired or unknown, pick an available text model from the provider's list. */
+async function pickAvailableModel(cfg: LlmConfig): Promise<string | null> {
+  try {
+    const res = await fetch(`${cfg.baseUrl}/models`, { headers: { Authorization: `Bearer ${cfg.apiKey}` } });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { data?: { id: string }[] };
+    const ids = (data.data ?? []).map((m) => m.id.replace(/^models\//, ''));
+    const usable = ids.filter((id) => !/(image|tts|audio|embed|vision|live|veo|imagen|aqa|learnlm|robotics|computer)/i.test(id));
+    const score = (id: string) =>
+      (/flash/i.test(id) ? 4 : /mini|small|instant/i.test(id) ? 3 : 1) - (/lite|nano/i.test(id) ? 1 : 0) - (/preview|exp/i.test(id) ? 2 : 0) + (/latest/i.test(id) ? 1 : 0);
+    usable.sort((a, b) => score(b) - score(a) || b.localeCompare(a, undefined, { numeric: true }));
+    return usable[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function llmJson<T = unknown>(system: string, user: string, opts: { temperature?: number; timeoutMs?: number } = {}): Promise<T> {
   const cfg = llmConfig();
   if (!cfg) throw new Error('No AI provider is configured (set GEMINI_API_KEY, GROQ_API_KEY or OPENAI_API_KEY).');
+  const model = resolvedModel ?? cfg.model;
+  try {
+    return await callModel<T>(cfg, model, system, user, opts);
+  } catch (e) {
+    if (!(e instanceof ModelUnavailableError)) throw e;
+    const alt = await pickAvailableModel(cfg);
+    if (!alt || alt === model) throw new Error(`AI model ${model} is not available: ${e.message}`);
+    resolvedModel = alt;
+    return callModel<T>(cfg, alt, system, user, opts);
+  }
+}
+
+class ModelUnavailableError extends Error {}
+
+async function callModel<T>(cfg: LlmConfig, model: string, system: string, user: string, opts: { temperature?: number; timeoutMs?: number }): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 55000);
   try {
@@ -43,7 +79,7 @@ export async function llmJson<T = unknown>(system: string, user: string, opts: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({
-        model: cfg.model,
+        model,
         temperature: opts.temperature ?? 0,
         response_format: { type: 'json_object' },
         messages: [
@@ -55,6 +91,9 @@ export async function llmJson<T = unknown>(system: string, user: string, opts: {
     });
     if (!res.ok) {
       const body = await res.text();
+      if (res.status === 404 || /not (found|available|supported)|no longer available|does not exist/i.test(body)) {
+        throw new ModelUnavailableError(`${res.status}: ${body.slice(0, 200)}`);
+      }
       throw new Error(`AI provider returned ${res.status}: ${body.slice(0, 300)}`);
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };

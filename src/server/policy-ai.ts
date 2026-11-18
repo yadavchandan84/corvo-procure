@@ -101,15 +101,28 @@ const PLANT_WORDS: [RegExp, string][] = [
   [/\b(pun1|bhosari)\b/i, 'PUN1'],
 ];
 
-function amount(s: string): number | null {
-  const m = s.match(/(?:₹|rs\.?|inr)?\s*([\d,]+(?:\.\d+)?)\s*(lakhs?|lacs?|l\b|crores?|cr\b|k\b|thousand)?/i);
-  if (!m) return null;
-  let n = Number(m[1].replace(/,/g, ''));
-  const unit = (m[2] ?? '').toLowerCase();
-  if (unit.startsWith('l')) n *= 100000;
-  else if (unit.startsWith('cr')) n *= 10000000;
-  else if (unit === 'k' || unit === 'thousand') n *= 1000;
-  return Number.isFinite(n) ? n : null;
+/**
+ * The new money amount in a sentence. Only real amounts count (with ₹/Rs/INR, lakh/crore/k, or
+ * comma grouping), so clause numbers like "5.4" are never read as a limit. The last amount wins,
+ * which is the new value in "raised from X to Y" and "X becomes Y".
+ */
+export function amount(s: string): number | null {
+  const re = /(₹|\brs\.?|\binr\b)?\s*(\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(lakhs?\b|lacs?\b|l\b|crores?\b|cr\b|k\b|thousand\b)?/gi;
+  const found: { value: number; index: number }[] = [];
+  for (const m of s.matchAll(re)) {
+    const currency = !!m[1];
+    const unit = (m[3] ?? '').toLowerCase();
+    const grouped = m[2].includes(',');
+    if (!currency && !unit && !grouped) continue;
+    let n = Number(m[2].replace(/,/g, ''));
+    if (unit.startsWith('l')) n *= 100000;
+    else if (unit.startsWith('cr')) n *= 10000000;
+    else if (unit === 'k' || unit === 'thousand') n *= 1000;
+    if (Number.isFinite(n) && n > 0) found.push({ value: n, index: m.index ?? 0 });
+  }
+  if (!found.length) return null;
+  // "raised from X to Y" / "X becomes Y": the new value comes last
+  return found[found.length - 1].value;
 }
 
 function findValueCond(rule: PolicyRule | undefined, op?: string) {
@@ -247,7 +260,7 @@ export async function proposePolicyChange(current: { version: string; effectiveF
       return await proposeWithAi(current, text, mode);
     } catch (e) {
       const fallback = proposeWithRules(current, text);
-      fallback.assumptions.unshift(`AI reader failed (${(e as Error).message.slice(0, 200)}); used the built-in rule reader instead.`);
+      fallback.assumptions = [`The AI reader failed (${(e as Error).message.slice(0, 200)}), so the built-in rule reader was used. Check every change below, and use the editor for anything listed as not understood.`];
       return fallback;
     }
   }
