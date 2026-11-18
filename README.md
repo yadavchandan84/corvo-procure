@@ -13,7 +13,7 @@
 ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-50_passing-2ea44f)
 
-**Live app:** _link added after deployment_ · [Decisions and assumptions](DECISIONS.md) · [Approach and AI use](APPROACH.md)
+**Live app: [policy-driven-pr-to-po.vercel.app](https://policy-driven-pr-to-po.vercel.app)** · [Decisions and assumptions](DECISIONS.md) · [Approach and AI use](APPROACH.md)
 
 </div>
 
