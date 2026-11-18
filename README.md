@@ -11,7 +11,7 @@
 ![Prisma](https://img.shields.io/badge/Prisma-2D3748?logo=prisma&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?logo=tailwindcss&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-50_passing-2ea44f)
+![Tests](https://img.shields.io/badge/tests-56_passing-2ea44f)
 
 **Live app: [policy-driven-pr-to-po.vercel.app](https://policy-driven-pr-to-po.vercel.app)** · [Decisions and assumptions](DECISIONS.md) · [Approach and AI use](APPROACH.md)
 
@@ -166,7 +166,7 @@ docker compose up -d db
 npx prisma migrate deploy
 npm run db:seed -- --kit ./kit    # master data, contracts, policy v5.0
 npm run dev                       # http://localhost:3000
-npm test                          # 50 tests
+npm test                          # 56 tests
 npm run batch -- --kit ./kit      # offline run, writes ./tmp/run.csv
 ```
 
@@ -238,7 +238,7 @@ tests/                 Vitest suites
 npm test
 ```
 
-The 50 tests cover:
+The 56 tests cover:
 
 - clubbing windows;
 - contract selection and ceilings;

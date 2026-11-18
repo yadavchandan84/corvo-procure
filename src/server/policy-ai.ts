@@ -80,8 +80,8 @@ ${amendment.slice(0, 30000)}
   const started = Date.now();
   for (let attempt = 0; attempt < 2; attempt++) {
     // stay inside the function time limit, leaving time for the built-in reader fallback
-    const left = 90000 - (Date.now() - started);
-    if (attempt > 0 && left < 25000) break;
+    const left = 45000 - (Date.now() - started);
+    if (attempt > 0 && left < 20000) break;
     const prompt = attempt === 0 ? user : `${user}\n\nYour previous edits had problems:\n${problems.join('\n')}\nReturn the corrected JSON object.`;
     const last = await llmJson<Record<string, unknown>>(SYSTEM, prompt, { timeoutMs: left });
     const edits = Array.isArray(last.edits) ? (last.edits as PolicyEdit[]) : [];

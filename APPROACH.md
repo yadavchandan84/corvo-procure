@@ -34,11 +34,18 @@ tests/             vitest: engine, matching, policy diff/validation, PDF extract
   1. reading a policy amendment (uploaded PDF or text, or a change described in chat) into a draft policy version, which is validated and diffed before a human approves it;
   2. extracting request details from free-form chat messages, merged with the deterministic parser.
 
-  Without a key, the app uses its deterministic chat parser and a rule-based amendment reader. That reader handles limits, windows, lookbacks, plant-only limits and effective dates, and lists anything it did not understand. The policy editor in the app covers everything else. No decision ever calls an AI.
+  The AI does not rewrite the policy. It returns a short list of edits (change a parameter, change a limit inside a rule, add, update, move or remove a rule). The app applies the edits to the current version, validates the result, and shows the approver the computed difference. A short answer is fast and keeps every change visible.
+
+  Without a key, or when the AI provider is busy or out of free quota, the app falls back to its deterministic chat parser and a rule-based amendment reader. That reader handles:
+  - limits, windows, lookbacks and effective dates;
+  - plant-only limits;
+  - new rules for a plant, category or item type that send requirements to RFQ or RFP, placed where the amendment says.
+
+  It lists anything it did not understand, and the policy editor in the app covers everything else. No decision ever calls an AI.
 
 ## Testing
 
-`npm test` runs 50 tests:
+`npm test` runs 56 tests:
 
 - clubbing windows, plants and new items;
 - contract selection, ceilings and consumption order;
