@@ -50,9 +50,12 @@ async function pickAvailableModel(cfg: LlmConfig, exclude: Set<string> = new Set
     if (!res.ok) return null;
     const data = (await res.json()) as { data?: { id: string }[] };
     const ids = (data.data ?? []).map((m) => m.id.replace(/^models\//, ''));
-    const usable = ids.filter((id) => !exclude.has(id) && !/(image|tts|audio|embed|vision|live|veo|imagen|aqa|learnlm|robotics|computer|gemma)/i.test(id));
+    const usable = ids.filter((id) => !exclude.has(id) && !/(image|tts|audio|embed|vision|live|veo|imagen|aqa|learnlm|robotics|computer|gemma|omni|pro)/i.test(id));
+    // prefer the plain "flash-latest" / "flash-lite-latest" aliases, then numbered stable flash models
     const score = (id: string) =>
-      (/flash/i.test(id) ? 4 : /mini|small|instant/i.test(id) ? 3 : 1) - (/lite|nano/i.test(id) ? 1 : 0) - (/preview|exp/i.test(id) ? 2 : 0) + (/latest/i.test(id) ? 1 : 0);
+      (/^gemini-flash-latest$/.test(id) ? 10 : /^gemini-flash-lite-latest$/.test(id) ? 9 : 0) +
+      (/flash/i.test(id) ? 4 : /mini|small|instant/i.test(id) ? 3 : 1) -
+      (/preview|exp/i.test(id) ? 3 : 0);
     usable.sort((a, b) => score(b) - score(a) || b.localeCompare(a, undefined, { numeric: true }));
     return usable[0] ?? null;
   } catch {
@@ -65,33 +68,52 @@ export async function llmJson<T = unknown>(system: string, user: string, opts: L
   if (!cfg) throw new Error('No AI provider is configured (set GEMINI_API_KEY, GROQ_API_KEY or OPENAI_API_KEY).');
   const started = Date.now();
   const budget = opts.timeoutMs ?? 50000;
-  const tried = new Set<string>();
+  const unusable = new Set<string>();
   let model = resolvedModel ?? cfg.model;
-  let lastError: Error | null = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  const errors: string[] = [];
+  for (let attempt = 0; attempt < 5; attempt++) {
     const left = budget - (Date.now() - started);
     if (left < 4000) break;
     try {
-      return await callModel<T>(cfg, model, system, user, { ...opts, timeoutMs: left });
+      const out = await callModel<T>(cfg, model, system, user, { ...opts, timeoutMs: left });
+      resolvedModel = model; // remember only a model that actually answered
+      return out;
     } catch (e) {
-      lastError = e as Error;
-      tried.add(model);
+      errors.push(`${model}: ${(e as Error).message.slice(0, 300)}`);
       if (e instanceof ModelUnavailableError) {
-        // retired or unknown model: switch for good
-        const alt = await pickAvailableModel(cfg, tried);
+        // retired, unknown, or not included in this plan (quota limit 0): never retry it
+        unusable.add(model);
+        const alt = await pickAvailableModel(cfg, unusable);
         if (!alt) break;
-        resolvedModel = model = alt;
+        model = alt;
       } else if (e instanceof TransientError) {
-        // overloaded or rate limited: wait briefly, then retry; from the second failure try another model
-        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-        if (attempt >= 1) {
-          const alt = await pickAvailableModel(cfg, tried);
-          if (alt) model = alt;
-        }
+        // overloaded or rate limited: wait briefly and retry the same model
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      } else if ((e as Error).name === 'AbortError') {
+        break; // out of time
       } else throw e;
     }
   }
-  throw lastError ?? new Error('The AI provider did not answer in time.');
+  throw new Error(errors.length ? errors.join(' | ') : 'The AI provider did not answer in time.');
+}
+
+/** Self-check for the deploy: which models the key can list, and whether a tiny request works. */
+export async function llmSelfCheck() {
+  const cfg = llmConfig();
+  if (!cfg) return { enabled: false };
+  let models: string[] = [];
+  try {
+    const res = await fetch(`${cfg.baseUrl}/models`, { headers: { Authorization: `Bearer ${cfg.apiKey}` } });
+    const data = (await res.json()) as { data?: { id: string }[] };
+    models = (data.data ?? []).map((m) => m.id.replace(/^models\//, ''));
+  } catch {}
+  const t0 = Date.now();
+  try {
+    const r = await llmJson<{ ok?: boolean }>('Reply with the JSON object {"ok": true}.', 'ping', { timeoutMs: 30000, reasoning: 'none' });
+    return { enabled: true, provider: cfg.provider, configured: cfg.model, used: resolvedModel, ok: r?.ok === true, ms: Date.now() - t0, models };
+  } catch (e) {
+    return { enabled: true, provider: cfg.provider, configured: cfg.model, ok: false, error: (e as Error).message.slice(0, 1500), models };
+  }
 }
 
 class ModelUnavailableError extends Error {}
@@ -122,6 +144,7 @@ async function callModel<T>(cfg: LlmConfig, model: string, system: string, user:
       if (res.status === 404 || /not (found|available|supported)|no longer available|does not exist/i.test(body)) {
         throw new ModelUnavailableError(`${res.status}: ${body.slice(0, 200)}`);
       }
+      if (res.status === 429 && /limit: 0\b/.test(body)) throw new ModelUnavailableError(`model ${model} is not included in this plan: ${body.replace(/\s+/g, ' ').slice(0, 200)}`);
       if (res.status === 429 || res.status >= 500) throw new TransientError(`AI provider busy (${res.status}, model ${model}): ${body.replace(/\s+/g, ' ').slice(0, 700)}`);
       throw new Error(`AI provider returned ${res.status}: ${body.slice(0, 300)}`);
     }
