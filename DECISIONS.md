@@ -125,3 +125,22 @@ Ties go to the lower supplier id. The reference price follows 6.3: the supplier'
 ## 12. Timeline
 
 The email lists the build deadline as "Wed 19 Nov", but 19 Nov 2026 is a Thursday, and the brief says Thu 19 Nov 10:00 IST. I treated **Thu 19 Nov 10:00 IST** as the code freeze. The blind test then uses only the app's own features (batch upload, policy upload and approval, exports), with no code changes.
+
+## 13. Blind test (19 Nov 2026): notes
+
+All steps used the hosted app's own features: batch upload, policy upload, draft edit, approval, re-run and exports. No code changed after the 10:00 freeze.
+
+- **Run 1:** I uploaded `hidden_pr_batch.csv` while v5.0 was the only approved version. 190 lines → 153 requirements → 95 POs.
+- **Amendment:** I uploaded `Corvo_Policy_Amendment_1_v5.1.pdf` on the Policy page. The AI reader produced draft v5.1, effective 2026-12-01, with A1, A2 and A3. I checked the draft against the PDF and made one correction in the draft editor before approving:
+  - **A3 needs two routes.** It says "RFQ, or RFP at or above the RFP threshold", and the reader had made rule 5.2A RFQ-only. A rule has one outcome, so 5.2A became two rules placed right after 5.2: CHK1 + Electrical Spares + value ≥ ₹50,000 and < ₹8,00,000 → RFQ (3 suggestions), and the same at ≥ ₹8,00,000 → RFP (5 suggestions). A usable contract still wins, because 5.2 comes first.
+  - **A1** is a separate rule for Packaging (spot PO below ₹1,00,000), and rule 5.4 now excludes Packaging. Rule 5.3 (emergency, up to ₹5,00,000) is unchanged and still comes before both. The amendment changes only 5.4, so a Packaging **emergency** of ₹1–5 lakh with purchase history is still an emergency PO.
+  - **A2** moves the 5.5/5.6 boundary to ₹8,00,000 in both rules.
+- **Run 2:** I re-ran the same batch. Each requirement uses the version in force on its requirement date: 92 lines are dated before 1 Dec (v5.0) and 98 on or after it (v5.1).
+  - A requirement that **started before 1 Dec stays under v5.0**, even if later lines were clubbed into it (section 1.2). For example, PUN1 stretch film PR-26-00598 (28 Nov) is clubbed with PR-26-00609 (10 Dec).
+  - The amendment changed 19 lines: 7 Packaging requirements SPOT_PO → RFQ, 8 Chakan Electrical Spares requirements SPOT_PO → RFQ, and 4 requirements of ₹8–10 lakh RFQ → RFP.
+- **Preferred lists:** exported as of 2026-12-01, top 3 per item. 68 items have at least one eligible supplier; items with none have no rows. No Blocked or Inactive supplier appears in any file.
+- **Data in the hidden batch:**
+  - PR-26-00674 has quantity 0, and PR-26-00675 has plant PUN2. Both are NOT_PROCESSED with the reason (section 2).
+  - Ultrasonic thickness gauge, drinking water purifier and thermal imaging camera are new items, valued at the requester's estimate (1.2).
+  - "nitrile gloves (repeat)" (PR-26-00656) is treated as a genuine need and matched to ITM-1048.
+  - PR-26-00676/00677 (MCB, CHK1, 4 minutes apart) are clubbed into one requirement.
